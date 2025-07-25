@@ -104,9 +104,3 @@ Thumbs.db
 *.json
 data/raw/*
 !data/raw/.gitkeep
-
-# Model files (if large)
-*.pkl
-*.joblib
-*.h5
-*.model
