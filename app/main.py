@@ -3,8 +3,8 @@ from PIL import Image
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from app.ocr import OCRProcessor
-from app.processor import NutriAnalyzer
+from ocr import OCRProcessor
+from processor import NutriAnalyzer
 import sys
 import os
 
