@@ -99,8 +99,3 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-# Data files (if large)
-*.csv
-*.json
-data/raw/*
-!data/raw/.gitkeep
