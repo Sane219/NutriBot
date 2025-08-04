@@ -86,6 +86,13 @@ def handle_image_upload(analyzer, show_debug, show_nutrition_breakdown):
             with st.spinner("🔍 Extracting text from image..."):
                 try:
                     ocr_processor = OCRProcessor()
+                    if not ocr_processor.ocr_available:
+                        st.error("🚫 OCR functionality not available")
+                        st.info("📋 To enable image text extraction, install EasyOCR:")
+                        st.code("pip install easyocr", language="bash")
+                        st.info("💡 For now, please use the 'Manual Entry' option instead.")
+                        return
+                    
                     ocr_result = ocr_processor.extract_text_from_image(image)
                 except Exception as e:
                     st.error(f"Error processing image: {str(e)}")
@@ -107,10 +114,28 @@ def handle_image_upload(analyzer, show_debug, show_nutrition_breakdown):
         
         # Perform complete analysis
         if ocr_result:
+            product_name = ocr_result.get('product_name', '').strip()
+            ingredients = ocr_result.get('ingredients', '').strip()
+            full_text = ocr_result.get('full_text', '').strip()
+            
+            # Debug information
+            if show_debug:
+                st.subheader("🔍 Extracted Information")
+                st.write(f"**Product Name**: '{product_name}'")
+                st.write(f"**Ingredients**: '{ingredients}'")
+                st.write(f"**Nutrition Values**: {nutrition_values}")
+                st.write(f"**Full Text Length**: {len(full_text)} characters")
+            
+            # If no specific fields were extracted but we have text, use the full text as product info
+            if not product_name and not ingredients and not nutrition_values and full_text:
+                st.info("🔍 No specific product details found, but text was extracted. Using full text for analysis.")
+                product_name = "Unknown Product"
+                ingredients = full_text  # Use full text as ingredients for analysis
+            
             perform_analysis(
                 analyzer,
-                product_name=ocr_result.get('product_name', ''),
-                ingredients=ocr_result.get('ingredients', ''),
+                product_name=product_name,
+                ingredients=ingredients,
                 nutrition_facts=nutrition_values,
                 show_debug=show_debug,
                 show_nutrition_breakdown=show_nutrition_breakdown
@@ -149,7 +174,7 @@ def handle_manual_entry(analyzer, show_debug, show_nutrition_breakdown):
                 protein = st.number_input("Protein (g)", min_value=0.0, value=0.0, step=0.1)
                 sodium = st.number_input("Sodium (g)", min_value=0.0, value=0.0, step=0.001, format="%.3f")
         
-        submitted = st.form_submit_button("🔍 Analyze Product", use_container_width=True)
+        submitted = st.form_submit_button("🔍 Analyze Product", use_column_width=True)
         
         if submitted:
             # Create nutrition dictionary (USDA format)
@@ -173,8 +198,14 @@ def handle_manual_entry(analyzer, show_debug, show_nutrition_breakdown):
 def perform_analysis(analyzer, product_name, ingredients, nutrition_facts, show_debug, show_nutrition_breakdown):
     """Perform complete product analysis and display results"""
     
-    if not any([product_name, ingredients, nutrition_facts]):
+    # Check if we have any meaningful data
+    has_product_name = product_name and product_name.strip()
+    has_ingredients = ingredients and ingredients.strip()
+    has_nutrition = nutrition_facts and len(nutrition_facts) > 0
+    
+    if not any([has_product_name, has_ingredients, has_nutrition]):
         st.warning("Please provide at least some product information to analyze.")
+        st.info("💡 Try uploading a clearer image with visible text, or use the manual entry option.")
         return
     
     with st.spinner("🧠 Analyzing product with AI..."):
@@ -251,7 +282,7 @@ def perform_analysis(analyzer, product_name, ingredients, nutrition_facts, show_
                 }
             ))
             fig.update_layout(height=200)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_column_width=True)
             
             st.markdown(f"**Rating**: {rating}")
         else:
@@ -292,7 +323,7 @@ def perform_analysis(analyzer, product_name, ingredients, nutrition_facts, show_
                         names=['Fat', 'Protein', 'Carbohydrates'],
                         title="Macronutrient Calories Distribution"
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_column_width=True)
             
             with col2:
                 # Other nutrients bar chart
@@ -304,7 +335,7 @@ def perform_analysis(analyzer, product_name, ingredients, nutrition_facts, show_
                         title="Other Nutrients (per 100g)",
                         labels={'x': 'Nutrient', 'y': 'Amount (g)'}
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_column_width=True)
     
     # Suggestions
     st.subheader("💡 Personalized Suggestions")

@@ -1,4 +1,10 @@
-import easyocr
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+    print("Warning: EasyOCR not available. OCR functionality will be limited.")
+
 import numpy as np
 from PIL import Image
 import re
@@ -10,8 +16,18 @@ class OCRProcessor:
     """
     
     def __init__(self):
-        # Initialize EasyOCR reader for English
-        self.reader = easyocr.Reader(['en'], gpu=False)
+        # Initialize EasyOCR reader for English if available
+        if EASYOCR_AVAILABLE:
+            try:
+                self.reader = easyocr.Reader(['en'], gpu=False)
+                self.ocr_available = True
+            except Exception as e:
+                print(f"Warning: Could not initialize EasyOCR: {e}")
+                self.reader = None
+                self.ocr_available = False
+        else:
+            self.reader = None
+            self.ocr_available = False
     
     def extract_text_from_image(self, image) -> Dict[str, str]:
         """
@@ -23,6 +39,16 @@ class OCRProcessor:
         Returns:
             Dict containing extracted text components
         """
+        if not self.ocr_available:
+            return {
+                'full_text': 'OCR not available - EasyOCR not installed',
+                'product_name': 'Unknown Product',
+                'ingredients': 'Please install EasyOCR for text extraction',
+                'nutrition_facts': '',
+                'confidence': 0.0,
+                'error': 'EasyOCR not available'
+            }
+        
         try:
             # Convert PIL Image to numpy array if needed
             if hasattr(image, 'convert'):
@@ -36,6 +62,23 @@ class OCRProcessor:
             
             # Parse different components
             parsed_data = self._parse_extracted_text(full_text)
+            
+            # If we have text but no parsed components, try to extract at least something useful
+            if full_text.strip() and not any(parsed_data.values()):
+                # Look for any food-related words to use as product name
+                food_words = ['bar', 'snack', 'cookie', 'chip', 'drink', 'juice', 'milk', 'bread', 'cereal']
+                words = full_text.lower().split()
+                
+                for word in words:
+                    if any(food_word in word for food_word in food_words):
+                        parsed_data['product_name'] = word.title()
+                        break
+                
+                # If still no product name, use first meaningful word
+                if not parsed_data.get('product_name'):
+                    meaningful_words = [w for w in words if len(w) > 3 and w.isalpha()]
+                    if meaningful_words:
+                        parsed_data['product_name'] = meaningful_words[0].title()
             
             return {
                 'full_text': full_text,
@@ -59,37 +102,51 @@ class OCRProcessor:
         """
         Parse extracted text to identify different components
         """
+        if not text or not text.strip():
+            return {}
+            
         text_lower = text.lower()
-        
         result = {}
         
         # Try to extract product name (usually at the top, in larger text)
-        lines = text.split('\n')
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
         if lines:
             # First non-empty line is likely the product name
             for line in lines:
-                if line.strip() and len(line.strip()) > 3:
-                    result['product_name'] = line.strip()
+                if len(line) > 3 and not any(keyword in line.lower() for keyword in ['ingredients', 'nutrition', 'calories', 'fat', 'protein']):
+                    result['product_name'] = line
                     break
         
-        # Try to extract ingredients
-        ingredients_match = re.search(r'ingredients?[:\s]+(.*?)(?=nutrition|allergen|$)', 
-                                    text_lower, re.IGNORECASE | re.DOTALL)
-        if ingredients_match:
-            result['ingredients'] = ingredients_match.group(1).strip()
+        # Try to extract ingredients with more flexible patterns
+        ingredients_patterns = [
+            r'ingredients?[:\s]+(.*?)(?=nutrition|allergen|contains|may contain|$)',
+            r'contains?[:\s]+(.*?)(?=nutrition|allergen|$)',
+            r'made with[:\s]+(.*?)(?=nutrition|allergen|$)'
+        ]
         
-        # Try to extract nutrition information
+        for pattern in ingredients_patterns:
+            ingredients_match = re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL)
+            if ingredients_match:
+                ingredients_text = ingredients_match.group(1).strip()
+                if len(ingredients_text) > 5:  # Only if we got meaningful text
+                    result['ingredients'] = ingredients_text
+                    break
+        
+        # Try to extract nutrition information with more flexible patterns
         nutrition_patterns = [
             r'nutrition.*?facts?[:\s]+(.*?)(?=ingredients|allergen|$)',
-            r'per\s+100g?[:\s]+(.*?)(?=ingredients|allergen|$)',
-            r'calories?[:\s]+(.*?)(?=ingredients|allergen|$)'
+            r'per\s+(?:100g?|serving)[:\s]+(.*?)(?=ingredients|allergen|$)',
+            r'calories?[:\s]*\d+.*?(?=ingredients|allergen|$)',
+            r'energy[:\s]*\d+.*?(?=ingredients|allergen|$)'
         ]
         
         for pattern in nutrition_patterns:
             nutrition_match = re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL)
             if nutrition_match:
-                result['nutrition_facts'] = nutrition_match.group(1).strip()
-                break
+                nutrition_text = nutrition_match.group(0).strip()  # Get the full match
+                if len(nutrition_text) > 5:  # Only if we got meaningful text
+                    result['nutrition_facts'] = nutrition_text
+                    break
         
         return result
     

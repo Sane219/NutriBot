@@ -25,8 +25,12 @@ class NutriAnalyzer:
         try:
             self.health_model.load_model()
             print("Health score model loaded successfully")
+        except FileNotFoundError:
+            print("Warning: Pre-trained health model not found. Using fallback scoring.")
+            self.health_model.is_trained = False
         except Exception as e:
             print(f"Warning: Could not load health model: {e}")
+            self.health_model.is_trained = False
     
     def analyze_product(self, 
                        product_name: str = "",
@@ -63,31 +67,37 @@ class NutriAnalyzer:
             }
         
         # Health score prediction
-        if nutrition_facts and self.health_model.is_trained:
+        if nutrition_facts:
             try:
-                # Ensure all required features are present
-                required_features = self.health_model.feature_columns
                 complete_nutrition = self._complete_nutrition_data(nutrition_facts)
                 
-                health_score = self.health_model.predict_health_score(complete_nutrition)
-                health_rating = self.health_model.get_health_rating(health_score)
+                if self.health_model.is_trained:
+                    # Use trained model
+                    health_score = self.health_model.predict_health_score(complete_nutrition)
+                    health_rating = self.health_model.get_health_rating(health_score)
+                else:
+                    # Use fallback scoring method
+                    health_score = self._calculate_fallback_health_score(complete_nutrition)
+                    health_rating = self.health_model.get_health_rating(health_score)
                 
                 results['health_analysis'] = {
                     'score': float(health_score),
                     'rating': health_rating,
-                    'nutrition_data': complete_nutrition
+                    'nutrition_data': complete_nutrition,
+                    'method': 'trained_model' if self.health_model.is_trained else 'fallback'
                 }
             except Exception as e:
                 results['health_analysis'] = {
                     'score': None,
                     'rating': 'Unknown',
-                    'error': str(e)
+                    'error': str(e),
+                    'nutrition_data': nutrition_facts or {}
                 }
         else:
             results['health_analysis'] = {
                 'score': None,
                 'rating': 'Insufficient data',
-                'nutrition_data': nutrition_facts or {}
+                'nutrition_data': {}
             }
         
         # Generate suggestions
@@ -119,6 +129,91 @@ class NutriAnalyzer:
         complete_data.update(nutrition_facts)
         
         return complete_data
+    
+    def _calculate_fallback_health_score(self, nutrition_data: Dict[str, float]) -> float:
+        """
+        Fallback health scoring when trained model is not available
+        Uses simple rule-based scoring similar to the model's training logic
+        """
+        score = 50  # Base score
+        
+        # Calories (per 100g) - moderate is better
+        calories = nutrition_data.get('Calories', 0)
+        if calories <= 100:
+            score += 15
+        elif calories <= 200:
+            score += 10
+        elif calories <= 300:
+            score += 5
+        elif calories > 500:
+            score -= 15
+        
+        # Protein - higher is better
+        protein = nutrition_data.get('Protein', 0)
+        if protein >= 20:
+            score += 15
+        elif protein >= 10:
+            score += 10
+        elif protein >= 5:
+            score += 5
+        
+        # Total Fat - moderate is better
+        fat = nutrition_data.get('TotalFat', 0)
+        if fat <= 3:
+            score += 10
+        elif fat <= 10:
+            score += 5
+        elif fat > 30:
+            score -= 15
+        
+        # Saturated Fat - lower is better
+        sat_fat = nutrition_data.get('SaturatedFat', 0)
+        if sat_fat <= 1:
+            score += 10
+        elif sat_fat <= 5:
+            score += 5
+        elif sat_fat > 10:
+            score -= 15
+        
+        # Sugar - lower is better
+        sugar = nutrition_data.get('Sugar', 0)
+        if sugar <= 2:
+            score += 10
+        elif sugar <= 10:
+            score += 5
+        elif sugar > 25:
+            score -= 15
+        
+        # Sodium - lower is better
+        sodium = nutrition_data.get('Sodium', 0)
+        if sodium <= 100:
+            score += 10
+        elif sodium <= 300:
+            score += 5
+        elif sodium > 1000:
+            score -= 15
+        
+        # Vitamins and minerals - higher is better
+        vitamin_c = nutrition_data.get('VitaminC', 0)
+        if vitamin_c >= 50:
+            score += 10
+        elif vitamin_c >= 10:
+            score += 5
+        
+        calcium = nutrition_data.get('Calcium', 0)
+        if calcium >= 200:
+            score += 8
+        elif calcium >= 100:
+            score += 4
+        
+        iron = nutrition_data.get('Iron', 0)
+        if iron >= 5:
+            score += 8
+        elif iron >= 2:
+            score += 4
+        
+        # Ensure score is within 0-100 range
+        return max(0, min(100, score))
     
     def _generate_suggestions(self, analysis_results: Dict) -> List[str]:
         """
