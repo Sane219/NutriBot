@@ -63,38 +63,60 @@ def handle_image_upload(analyzer, show_debug, show_nutrition_breakdown):
         help="Upload a clear image of food packaging, ingredient list, or nutrition label"
     )
     
+    # Validate file size (max 10MB)
+    if uploaded_file is not None and uploaded_file.size > 10 * 1024 * 1024:
+        st.error("File size too large. Please upload an image smaller than 10MB.")
+        return
+    
     if uploaded_file is not None:
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            image = Image.open(uploaded_file)
-            st.image(image, caption='Uploaded Image', use_container_width=True)
+            try:
+                image = Image.open(uploaded_file)
+                # Convert to RGB if necessary to ensure compatibility
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                st.image(image, caption='Uploaded Image', use_column_width=True)
+            except Exception as e:
+                st.error(f"Error loading image: {str(e)}")
+                return
         
         with col2:
             with st.spinner("🔍 Extracting text from image..."):
-                ocr_processor = OCRProcessor()
-                ocr_result = ocr_processor.extract_text_from_image(image)
+                try:
+                    ocr_processor = OCRProcessor()
+                    ocr_result = ocr_processor.extract_text_from_image(image)
+                except Exception as e:
+                    st.error(f"Error processing image: {str(e)}")
+                    return
             
-            if show_debug:
+            if show_debug and ocr_result:
                 st.subheader("🔍 OCR Debug Information")
-                st.write(f"**OCR Confidence**: {ocr_result['confidence']:.2%}")
+                st.write(f"**OCR Confidence**: {ocr_result.get('confidence', 0):.2%}")
                 with st.expander("Raw extracted text"):
-                    st.text(ocr_result['full_text'])
+                    st.text(ocr_result.get('full_text', 'No text extracted'))
         
         # Extract nutrition values
-        nutrition_values = ocr_processor.extract_nutrition_values(
-            ocr_result['nutrition_facts'] + " " + ocr_result['full_text']
-        )
+        if ocr_result:
+            nutrition_text = (ocr_result.get('nutrition_facts', '') + " " + 
+                            ocr_result.get('full_text', ''))
+            nutrition_values = ocr_processor.extract_nutrition_values(nutrition_text)
+        else:
+            nutrition_values = {}
         
         # Perform complete analysis
-        perform_analysis(
-            analyzer,
-            product_name=ocr_result['product_name'],
-            ingredients=ocr_result['ingredients'],
-            nutrition_facts=nutrition_values,
-            show_debug=show_debug,
-            show_nutrition_breakdown=show_nutrition_breakdown
-        )
+        if ocr_result:
+            perform_analysis(
+                analyzer,
+                product_name=ocr_result.get('product_name', ''),
+                ingredients=ocr_result.get('ingredients', ''),
+                nutrition_facts=nutrition_values,
+                show_debug=show_debug,
+                show_nutrition_breakdown=show_nutrition_breakdown
+            )
+        else:
+            st.error("Failed to extract information from the image. Please try with a clearer image or use manual entry.")
 
 def handle_manual_entry(analyzer, show_debug, show_nutrition_breakdown):
     """Handle manual product entry"""
